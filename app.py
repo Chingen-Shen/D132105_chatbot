@@ -150,6 +150,46 @@ def respond(message: dict, history: list) -> tuple:
     return history, gr.update(value=None)
 
 
+def handle_edit(history: list, edit_data: gr.EditData) -> list:
+    """
+    當使用者編輯先前的訊息時，截斷歷史並從該訊息重新產生回應。
+    """
+    edited_idx = edit_data.index
+    new_value = edit_data.value
+
+    # 只處理使用者訊息的編輯
+    if edited_idx >= len(history) or history[edited_idx].get("role") != "user":
+        return history
+
+    # 計算被編輯的訊息屬於第幾輪（以 assistant 訊息數為基準）
+    agent_turn = sum(
+        1 for i in range(edited_idx) if history[i].get("role") == "assistant"
+    )
+
+    # 截斷 Agent 內部狀態至該輪之前
+    agent.truncate_to_turn(agent_turn)
+
+    # 截斷 Gradio 顯示歷史：找到該輪的起始位置
+    cut_point = 0
+    for i in range(edited_idx - 1, -1, -1):
+        if history[i].get("role") == "assistant":
+            cut_point = i + 1
+            break
+    truncated_history = history[:cut_point]
+
+    # 加入編輯後的訊息
+    truncated_history.append({"role": "user", "content": new_value})
+
+    # 呼叫 Agent 取得新回覆
+    try:
+        reply = agent.chat(new_value)
+    except Exception as e:
+        reply = f"❌ 發生錯誤：{e}"
+
+    truncated_history.append({"role": "assistant", "content": reply})
+    return truncated_history
+
+
 def clear_chat() -> tuple:
     """清除對話歷史。"""
     agent.reset()
@@ -187,6 +227,7 @@ with gr.Blocks(title="Gemini Chat") as demo:
         render_markdown=True,
         layout="bubble",
         placeholder="💬 開始與 Gemini 對話吧！",
+        editable="user",
     )
 
     # ── 輸入區 ──
@@ -227,6 +268,12 @@ with gr.Blocks(title="Gemini Chat") as demo:
         fn=respond,
         inputs=[textbox, chatbot],
         outputs=[chatbot, textbox],
+    )
+
+    chatbot.edit(
+        fn=handle_edit,
+        inputs=[chatbot],
+        outputs=[chatbot],
     )
 
     clear_btn.click(

@@ -118,6 +118,41 @@ class ChatAgent:
         self.chat_history = InMemoryChatMessageHistory()
         self.conversation_log.clear()
 
+    def truncate_to_turn(self, n: int) -> None:
+        """保留前 n 輪對話（每輪 = 一組 user + ai），截斷之後的所有訊息。"""
+        # 截斷 LangChain chat_history
+        messages = self.chat_history.messages
+        keep_messages = []
+        turn = 0
+        i = 0
+        while i < len(messages) and turn < n:
+            if isinstance(messages[i], HumanMessage):
+                keep_messages.append(messages[i])
+                if i + 1 < len(messages) and isinstance(messages[i + 1], AIMessage):
+                    keep_messages.append(messages[i + 1])
+                    i += 2
+                else:
+                    i += 1
+                turn += 1
+            else:
+                keep_messages.append(messages[i])
+                i += 1
+
+        self.chat_history = InMemoryChatMessageHistory()
+        for msg in keep_messages:
+            self.chat_history.add_message(msg)
+
+        # 截斷 conversation_log（每組 user + ai 為一輪）
+        log_turns = 0
+        log_cut = len(self.conversation_log)
+        for j, entry in enumerate(self.conversation_log):
+            if entry["role"] == "ai":
+                log_turns += 1
+                if log_turns >= n:
+                    log_cut = j + 1
+                    break
+        self.conversation_log = self.conversation_log[:log_cut]
+
     # ── 聊天核心 ──────────────────────────────────────────────
 
     def chat(
